@@ -1,6 +1,6 @@
 import { createAdapter, type SqliteAdapter } from "./sqlite-adapter.js";
 import { readFileSync, readdirSync, mkdtempSync, unlinkSync, rmdirSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 
@@ -99,20 +99,23 @@ export function coreDataTimestampToISO(timestamp: number): string {
   return new Date((timestamp + CORE_DATA_EPOCH) * 1000).toISOString();
 }
 
-/** Convert Things day integer (days since 2001-01-01) to YYYY-MM-DD */
-export function dayIntegerToDate(dayInt: number): string {
-  const ms = (dayInt * 86400 + CORE_DATA_EPOCH) * 1000;
-  const d = new Date(ms);
-  const year = d.getUTCFullYear();
-  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+/** Encode year/month/day as a Things date integer (YYYYYYYYYYYMMMMDDDDD0000000) */
+export function dateToThingsDate(year: number, month: number, day: number): number {
+  return (year << 16) | (month << 12) | (day << 7);
 }
 
-/** Get today as days since 2001-01-01 */
-export function todayAsDayInteger(): number {
-  const now = Date.now() / 1000;
-  return Math.floor((now - CORE_DATA_EPOCH) / 86400);
+/** Decode a Things date integer (YYYYYYYYYYYMMMMDDDDD0000000) to YYYY-MM-DD */
+export function thingsDateToISO(thingsDate: number): string {
+  const year = (thingsDate >> 16) & 0x7FF;
+  const month = (thingsDate >> 12) & 0xF;
+  const day = (thingsDate >> 7) & 0x1F;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** Get today as a Things date integer */
+export function todayAsThingsDate(): number {
+  const now = new Date();
+  return dateToThingsDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
 }
 
 // --- Database Connection ---
@@ -161,8 +164,10 @@ function readSqliteFile(dbPath: string): Buffer {
   const tmp = mkdtempSync(join(tmpdir(), "things-mcp-"));
   const tmpFile = join(tmp, "backup.sqlite");
   try {
-    execSync(`sqlite3 "${dbPath}" ".backup '${tmpFile}'"`, { stdio: "pipe" });
-    return readFileSync(tmpFile);
+    if (runSqliteBackup(dbPath, tmpFile)) {
+      return readFileSync(tmpFile);
+    }
+    return readFileSync(dbPath);
   } catch {
     // sqlite3 CLI unavailable — fall back to raw read
     return readFileSync(dbPath);
@@ -184,6 +189,17 @@ export function getDb(): SqliteAdapter {
   return createAdapter(data);
 }
 
+function runSqliteBackup(dbPath: string, tmpFile: string): boolean {
+  const result = spawnSync("sqlite3", [dbPath, _buildSqliteBackupCommand(tmpFile)], {
+    stdio: "ignore",
+  });
+  return result.status === 0 && !result.error;
+}
+
+export function _buildSqliteBackupCommand(tmpFile: string): string {
+  return `.backup ${tmpFile}`;
+}
+
 // --- Status/Start Helpers ---
 
 function mapStatus(status: number): "open" | "completed" | "canceled" {
@@ -203,7 +219,7 @@ function mapStart(start: number | null): "inbox" | "anytime" | "someday" | null 
 
 export function queryTodos(filters: TodoFilters = {}): Todo[] {
   const database = getDb();
-  const conditions: string[] = ["t.type = 0"];
+  const conditions: string[] = ["t.type = 0", "t.rt1_recurrenceRule IS NULL"];
   const params: Record<string, string | number> = {};
   const limit = filters.limit ?? 50;
 
@@ -212,40 +228,39 @@ export function queryTodos(filters: TodoFilters = {}): Todo[] {
   }
 
   if (filters.list) {
-    const todayDays = todayAsDayInteger();
+    const todayThingsDate = todayAsThingsDate();
     switch (filters.list) {
       case "inbox":
-        conditions.push("t.status = 0", "t.start = 0", "t.project IS NULL");
+        conditions.push("t.status = 0", "t.start = 0");
         break;
       case "today":
-        params.todayDays = todayDays;
+        params.todayThingsDate = todayThingsDate;
         conditions.push(
           "t.status = 0",
-          "(t.todayIndex > 0 OR (t.startDate IS NOT NULL AND t.startDate <= $todayDays))",
+          `(
+            (t.start = 1 AND t.startDate IS NOT NULL)
+            OR (t.start = 2 AND t.startDate IS NOT NULL AND t.startDate <= $todayThingsDate)
+            OR (t.startDate IS NULL AND t.deadline IS NOT NULL AND t.deadline <= $todayThingsDate AND t.deadlineSuppressionDate IS NULL)
+          )`,
         );
         break;
       case "anytime":
-        params.todayDays = todayDays;
-        conditions.push(
-          "t.status = 0",
-          "t.start = 1",
-          "(t.startDate IS NULL OR t.startDate <= $todayDays)",
-        );
+        conditions.push("t.status = 0", "t.start = 1");
         break;
       case "someday":
-        conditions.push("t.status = 0", "t.start = 2");
+        conditions.push("t.status = 0", "t.start = 2", "t.startDate IS NULL");
         break;
       case "upcoming":
-        params.todayDays = todayDays;
+        params.todayThingsDate = todayThingsDate;
         conditions.push(
           "t.status = 0",
-          "t.start = 1",
+          "t.start = 2",
           "t.startDate IS NOT NULL",
-          "t.startDate > $todayDays",
+          "t.startDate > $todayThingsDate",
         );
         break;
       case "logbook":
-        conditions.push("t.status = 3");
+        conditions.push("(t.status = 3 OR t.status = 2)");
         break;
       case "trash":
         conditions.push("t.trashed = 1");
@@ -441,8 +456,8 @@ export function queryProjectById(uuid: string): ProjectDetail | null {
     notes: row.notes ?? "",
     status: mapStatus(row.status),
     start: mapStart(row.start),
-    startDate: row.startDate != null ? dayIntegerToDate(row.startDate) : null,
-    deadline: row.deadline != null ? dayIntegerToDate(row.deadline) : null,
+    startDate: row.startDate != null ? thingsDateToISO(row.startDate) : null,
+    deadline: row.deadline != null ? thingsDateToISO(row.deadline) : null,
     areaId: row.areaId,
     areaTitle: row.areaTitle,
     creationDate: coreDataTimestampToISO(row.creationDate),
@@ -585,8 +600,8 @@ function formatTodo(
     notes: r.notes ?? "",
     status: mapStatus(r.status),
     start: mapStart(r.start),
-    startDate: r.startDate != null ? dayIntegerToDate(r.startDate) : null,
-    deadline: r.deadline != null ? dayIntegerToDate(r.deadline) : null,
+    startDate: r.startDate != null ? thingsDateToISO(r.startDate) : null,
+    deadline: r.deadline != null ? thingsDateToISO(r.deadline) : null,
     todayIndex: r.todayIndex,
     projectId: r.projectId,
     projectTitle: r.projectTitle,
@@ -609,8 +624,8 @@ function formatProject(r: RawProjectRow, tagsMap: Map<string, string[]>): Projec
     notes: r.notes ?? "",
     status: mapStatus(r.status),
     start: mapStart(r.start),
-    startDate: r.startDate != null ? dayIntegerToDate(r.startDate) : null,
-    deadline: r.deadline != null ? dayIntegerToDate(r.deadline) : null,
+    startDate: r.startDate != null ? thingsDateToISO(r.startDate) : null,
+    deadline: r.deadline != null ? thingsDateToISO(r.deadline) : null,
     areaId: r.areaId,
     areaTitle: r.areaTitle,
     creationDate: coreDataTimestampToISO(r.creationDate),

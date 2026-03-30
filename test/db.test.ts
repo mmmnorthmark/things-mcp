@@ -2,8 +2,10 @@ import { test, expect, describe, beforeAll, beforeEach, afterEach } from "vitest
 import { initSql, createAdapter, type SqliteAdapter } from "../src/sqlite-adapter.js";
 import {
   coreDataTimestampToISO,
-  dayIntegerToDate,
-  todayAsDayInteger,
+  dateToThingsDate,
+  thingsDateToISO,
+  todayAsThingsDate,
+  _buildSqliteBackupCommand,
   _setDb,
   queryTodos,
   queryTodoById,
@@ -27,31 +29,46 @@ describe("coreDataTimestampToISO", () => {
   });
 });
 
-describe("dayIntegerToDate", () => {
-  test("converts 0 to 2001-01-01", () => {
-    expect(dayIntegerToDate(0)).toBe("2001-01-01");
+describe("dateToThingsDate", () => {
+  test("encodes 2021-03-28 to 132464128", () => {
+    expect(dateToThingsDate(2021, 3, 28)).toBe(132464128);
   });
 
-  test("converts a known day integer", () => {
-    // 2024-01-15 = 8414 days after 2001-01-01
-    expect(dayIntegerToDate(8414)).toBe("2024-01-15");
-  });
-
-  test("converts day 365 to 2002-01-01", () => {
-    expect(dayIntegerToDate(365)).toBe("2002-01-01");
+  test("encodes year/month/day using bit-packing", () => {
+    expect(dateToThingsDate(2026, 3, 23)).toBe((2026 << 16) | (3 << 12) | (23 << 7));
   });
 });
 
-describe("todayAsDayInteger", () => {
-  test("returns a positive integer", () => {
-    const today = todayAsDayInteger();
-    expect(today).toBeGreaterThan(0);
+describe("thingsDateToISO", () => {
+  test("decodes 132464128 to 2021-03-28", () => {
+    expect(thingsDateToISO(132464128)).toBe("2021-03-28");
   });
 
-  test("returns a reasonable value (after 2024)", () => {
-    // 2024-01-01 is approximately 8401 days after 2001-01-01
-    const today = todayAsDayInteger();
-    expect(today).toBeGreaterThan(8400);
+  test("round-trips through dateToThingsDate", () => {
+    expect(thingsDateToISO(dateToThingsDate(2026, 3, 23))).toBe("2026-03-23");
+  });
+
+  test("handles single-digit month and day with zero-padding", () => {
+    expect(thingsDateToISO(dateToThingsDate(2024, 1, 5))).toBe("2024-01-05");
+  });
+});
+
+describe("todayAsThingsDate", () => {
+  test("returns a positive integer", () => {
+    expect(todayAsThingsDate()).toBeGreaterThan(0);
+  });
+
+  test("round-trips to today's date", () => {
+    const now = new Date();
+    const expected = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    expect(thingsDateToISO(todayAsThingsDate())).toBe(expected);
+  });
+});
+
+describe("_buildSqliteBackupCommand", () => {
+  test("treats the backup path as literal command data", () => {
+    const tmpFile = "/tmp/backup'\";touch /tmp/pwned;echo '.sqlite";
+    expect(_buildSqliteBackupCommand(tmpFile)).toBe(`.backup ${tmpFile}`);
   });
 });
 
@@ -64,6 +81,10 @@ beforeAll(async () => {
 let testDb: SqliteAdapter;
 
 function seedDatabase(db: SqliteAdapter): void {
+  const todayThingsDate = todayAsThingsDate();
+  const pastThingsDate = dateToThingsDate(2020, 1, 1);
+  const futureThingsDate = dateToThingsDate(2040, 12, 31);
+
   // Create schema matching Things 3
   db.exec(`
     CREATE TABLE TMArea (
@@ -97,7 +118,9 @@ function seedDatabase(db: SqliteAdapter): void {
       creationDate REAL DEFAULT 0,
       userModificationDate REAL,
       stopDate REAL,
-      "index" INTEGER DEFAULT 0
+      "index" INTEGER DEFAULT 0,
+      rt1_recurrenceRule TEXT,
+      deadlineSuppressionDate REAL
     );
 
     CREATE TABLE TMTaskTag (
@@ -146,20 +169,24 @@ function seedDatabase(db: SqliteAdapter): void {
   `);
 
   // Seed todos (type=0)
-  const todayDays = todayAsDayInteger();
   db.exec(`
-    INSERT INTO TMTask (uuid, title, notes, type, status, start, startDate, deadline, todayIndex, project, area, heading, trashed, creationDate, userModificationDate, stopDate, "index") VALUES
-      ('todo-inbox-1', 'Buy groceries', 'Need milk and eggs', 0, 0, 0, NULL, NULL, 0, NULL, NULL, NULL, 0, 700000000, 700000100, NULL, 0),
-      ('todo-inbox-2', 'Call dentist', '', 0, 0, 0, NULL, NULL, 0, NULL, NULL, NULL, 0, 700000200, NULL, NULL, 1),
-      ('todo-today-1', 'Review PR', 'Check the code', 0, 0, 1, NULL, NULL, 1, 'proj-2', 'area-work', NULL, 0, 700000300, NULL, NULL, 0),
-      ('todo-today-2', 'Send email', '', 0, 0, 1, ${todayDays}, NULL, 0, NULL, 'area-work', NULL, 0, 700000400, NULL, NULL, 1),
-      ('todo-anytime-1', 'Read book', 'Finish chapter 5', 0, 0, 1, NULL, NULL, 0, NULL, 'area-personal', NULL, 0, 700000500, NULL, NULL, 0),
-      ('todo-someday-1', 'Learn piano', '', 0, 0, 2, NULL, NULL, 0, NULL, NULL, NULL, 0, 700000600, NULL, NULL, 0),
-      ('todo-upcoming-1', 'Future task', '', 0, 0, 1, ${todayDays + 10}, NULL, 0, NULL, NULL, NULL, 0, 700000700, NULL, NULL, 0),
-      ('todo-completed-1', 'Done task', '', 0, 3, 1, NULL, NULL, 0, NULL, NULL, NULL, 0, 700000800, NULL, 700001000, 0),
-      ('todo-trashed-1', 'Trashed task', '', 0, 0, 1, NULL, NULL, 0, NULL, NULL, NULL, 1, 700000900, NULL, NULL, 0),
-      ('todo-proj-1', 'Kitchen remodel', '', 0, 0, 1, NULL, ${todayDays + 30}, 0, 'proj-1', 'area-personal', 'heading-1', 0, 700001000, NULL, NULL, 0),
-      ('todo-proj-2', 'Bathroom remodel', '', 0, 0, 1, NULL, NULL, 0, 'proj-1', 'area-personal', 'heading-2', 0, 700001100, NULL, NULL, 1);
+    INSERT INTO TMTask (uuid, title, notes, type, status, start, startDate, deadline, todayIndex, project, area, heading, trashed, creationDate, userModificationDate, stopDate, "index", rt1_recurrenceRule, deadlineSuppressionDate) VALUES
+      ('todo-inbox-1', 'Buy groceries', 'Need milk and eggs', 0, 0, 0, NULL, NULL, 0, NULL, NULL, NULL, 0, 700000000, 700000100, NULL, 0, NULL, NULL),
+      ('todo-inbox-2', 'Call dentist', '', 0, 0, 0, NULL, NULL, 0, NULL, NULL, NULL, 0, 700000200, NULL, NULL, 1, NULL, NULL),
+      ('todo-today-1', 'Review PR', 'Check the code', 0, 0, 1, ${todayThingsDate}, NULL, 1, 'proj-2', 'area-work', NULL, 0, 700000300, NULL, NULL, 0, NULL, NULL),
+      ('todo-today-2', 'Send email', '', 0, 0, 1, ${todayThingsDate}, NULL, 0, NULL, 'area-work', NULL, 0, 700000400, NULL, NULL, 1, NULL, NULL),
+      ('todo-anytime-1', 'Read book', 'Finish chapter 5', 0, 0, 1, NULL, NULL, 0, NULL, 'area-personal', NULL, 0, 700000500, NULL, NULL, 0, NULL, NULL),
+      ('todo-someday-1', 'Learn piano', '', 0, 0, 2, NULL, NULL, 0, NULL, NULL, NULL, 0, 700000600, NULL, NULL, 0, NULL, NULL),
+      ('todo-upcoming-1', 'Future task', '', 0, 0, 2, ${futureThingsDate}, NULL, 0, NULL, NULL, NULL, 0, 700000700, NULL, NULL, 0, NULL, NULL),
+      ('todo-completed-1', 'Done task', '', 0, 3, 1, NULL, NULL, 0, NULL, NULL, NULL, 0, 700000800, NULL, 700001000, 0, NULL, NULL),
+      ('todo-trashed-1', 'Trashed task', '', 0, 0, 1, NULL, NULL, 0, NULL, NULL, NULL, 1, 700000900, NULL, NULL, 0, NULL, NULL),
+      ('todo-proj-1', 'Kitchen remodel', '', 0, 0, 1, NULL, ${futureThingsDate}, 0, 'proj-1', 'area-personal', 'heading-1', 0, 700001000, NULL, NULL, 0, NULL, NULL),
+      ('todo-proj-2', 'Bathroom remodel', '', 0, 0, 1, NULL, NULL, 0, 'proj-1', 'area-personal', 'heading-2', 0, 700001100, NULL, NULL, 1, NULL, NULL),
+      ('todo-someday-scheduled', 'Scheduled someday', '', 0, 0, 2, ${pastThingsDate}, NULL, 0, NULL, NULL, NULL, 0, 700001200, NULL, NULL, 0, NULL, NULL),
+      ('todo-overdue-1', 'Overdue deadline', '', 0, 0, 1, NULL, ${pastThingsDate}, 0, NULL, NULL, NULL, 0, 700001400, NULL, NULL, 0, NULL, NULL),
+      ('todo-canceled-1', 'Canceled task', '', 0, 2, 1, NULL, NULL, 0, NULL, NULL, NULL, 0, 700001500, NULL, 700001600, 0, NULL, NULL),
+      ('todo-suppressed-1', 'Suppressed deadline', '', 0, 0, 1, NULL, ${pastThingsDate}, 0, NULL, NULL, NULL, 0, 700001700, NULL, NULL, 0, NULL, 700001700),
+      ('todo-recurring-1', 'Recurring template', '', 0, 0, 1, NULL, NULL, 0, NULL, NULL, NULL, 0, 700002000, NULL, NULL, 0, 'RRULE:FREQ=DAILY', NULL);
   `);
 
   // Seed task-tag associations
@@ -193,47 +220,63 @@ afterEach(() => {
 // --- queryTodos ---
 
 describe("queryTodos", () => {
-  test("inbox returns tasks with start=0 and no project", () => {
+  test("inbox returns tasks with start=0", () => {
     const todos = queryTodos({ list: "inbox" });
     expect(todos.length).toBe(2);
     expect(todos.every((t) => t.start === "inbox")).toBe(true);
-    expect(todos.every((t) => t.projectId === null)).toBe(true);
   });
 
-  test("today returns tasks with todayIndex > 0 or startDate <= today", () => {
+  test("today returns regular today, scheduled-someday, and overdue-deadline tasks", () => {
     const todos = queryTodos({ list: "today" });
-    expect(todos.length).toBeGreaterThanOrEqual(2);
     const uuids = todos.map((t) => t.uuid);
+    // Regular today: start=1 + startDate set
     expect(uuids).toContain("todo-today-1");
     expect(uuids).toContain("todo-today-2");
+    // Unconfirmed scheduled: start=2 + past startDate
+    expect(uuids).toContain("todo-someday-scheduled");
+    // Overdue deadline: no startDate + past deadline + no suppression
+    expect(uuids).toContain("todo-overdue-1");
+    // Should NOT include suppressed overdue
+    expect(uuids).not.toContain("todo-suppressed-1");
+    // Should NOT include anytime tasks without startDate
+    expect(uuids).not.toContain("todo-anytime-1");
   });
 
-  test("anytime returns open tasks with start=1 and startDate <= today or null", () => {
+  test("anytime returns open tasks with start=1", () => {
     const todos = queryTodos({ list: "anytime" });
-    expect(todos.length).toBeGreaterThanOrEqual(1);
     const uuids = todos.map((t) => t.uuid);
+    expect(todos.every((t) => t.start === "anytime")).toBe(true);
     expect(uuids).toContain("todo-anytime-1");
-    // Should not include upcoming tasks
+    // Today tasks also appear in anytime (lists are not mutually exclusive)
+    expect(uuids).toContain("todo-today-1");
+    expect(uuids).toContain("todo-today-2");
+    // Should not include someday or upcoming tasks
+    expect(uuids).not.toContain("todo-someday-1");
     expect(uuids).not.toContain("todo-upcoming-1");
   });
 
-  test("someday returns tasks with start=2", () => {
+  test("someday returns tasks with start=2 and no startDate", () => {
     const todos = queryTodos({ list: "someday" });
-    expect(todos.length).toBe(1);
-    expect(todos[0]!.uuid).toBe("todo-someday-1");
+    const uuids = todos.map((t) => t.uuid);
+    expect(uuids).toContain("todo-someday-1");
+    // Scheduled someday tasks should NOT appear (they belong in today or upcoming)
+    expect(uuids).not.toContain("todo-someday-scheduled");
+    expect(uuids).not.toContain("todo-upcoming-1");
   });
 
-  test("upcoming returns tasks with start=1 and startDate > today", () => {
+  test("upcoming returns tasks with start=2 and future startDate", () => {
     const todos = queryTodos({ list: "upcoming" });
-    expect(todos.length).toBe(1);
-    expect(todos[0]!.uuid).toBe("todo-upcoming-1");
+    const uuids = todos.map((t) => t.uuid);
+    expect(uuids).toContain("todo-upcoming-1");
+    // Past-scheduled someday should NOT appear (belongs in today)
+    expect(uuids).not.toContain("todo-someday-scheduled");
   });
 
-  test("logbook returns completed tasks", () => {
+  test("logbook returns completed and canceled tasks", () => {
     const todos = queryTodos({ list: "logbook" });
-    expect(todos.length).toBe(1);
-    expect(todos[0]!.uuid).toBe("todo-completed-1");
-    expect(todos[0]!.status).toBe("completed");
+    const uuids = todos.map((t) => t.uuid);
+    expect(uuids).toContain("todo-completed-1");
+    expect(uuids).toContain("todo-canceled-1");
   });
 
   test("trash returns trashed tasks", () => {
@@ -246,6 +289,12 @@ describe("queryTodos", () => {
     const todos = queryTodos({});
     const uuids = todos.map((t) => t.uuid);
     expect(uuids).not.toContain("todo-trashed-1");
+  });
+
+  test("excludes recurring task templates", () => {
+    const todos = queryTodos({});
+    const uuids = todos.map((t) => t.uuid);
+    expect(uuids).not.toContain("todo-recurring-1");
   });
 
   test("excludes headings (type=2)", () => {
