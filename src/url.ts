@@ -19,6 +19,8 @@ export interface ExecuteResult {
   callbackParams?: Record<string, string>;
 }
 
+const AUTH_TOKEN_PARAM = "auth-token";
+
 /**
  * Build a Things URL scheme URL from a command and parameters.
  * Pure function — no side effects, fully testable.
@@ -128,7 +130,7 @@ function executeWithXcall(url: string): Promise<ExecuteResult> {
 
     proc.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error(`xcall failed (code ${code}): ${stderr.trim()}`));
+        reject(new Error(buildProcessError("xcall", code, stderr, url)));
         return;
       }
 
@@ -179,7 +181,7 @@ function executeWithOpen(url: string): Promise<ExecuteResult> {
 
     proc.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error(`open command failed with code ${code}`));
+        reject(new Error(buildProcessError("open", code, "", url)));
         return;
       }
       resolve({ success: true });
@@ -221,9 +223,52 @@ export function _resetXcallCache(): void {
   xcallAvailable = null;
 }
 
+export function redactAuthToken(url: string): string {
+  const [base, query] = url.split("?", 2);
+  if (!query) return url;
+
+  const params = query
+    .split("&")
+    .filter(Boolean)
+    .map((part) => {
+      const [key, ...rest] = part.split("=");
+      if (key === AUTH_TOKEN_PARAM) {
+        return `${AUTH_TOKEN_PARAM}=[REDACTED]`;
+      }
+      return rest.length > 0 ? `${key}=${rest.join("=")}` : key;
+    });
+
+  return `${base}?${params.join("&")}`;
+}
+
 /**
  * Parse xcall stdout into an ExecuteResult (for testing).
  */
 export function _parseXcallOutput(rawOutput: string): ExecuteResult {
   return parseXcallOutput(rawOutput.trim());
+}
+
+export function _buildProcessError(
+  command: string,
+  code: number | null,
+  stderr: string,
+  url: string,
+): string {
+  return buildProcessError(command, code, stderr, url);
+}
+
+function buildProcessError(
+  command: string,
+  code: number | null,
+  stderr: string,
+  url: string,
+): string {
+  const redactedUrl = redactAuthToken(url);
+  const trimmedStderr = stderr.trim();
+
+  if (trimmedStderr.includes(AUTH_TOKEN_PARAM) || trimmedStderr.includes(redactedUrl)) {
+    return `${command} failed${code === null ? "" : ` with code ${code}`}`;
+  }
+
+  return `${command} failed${code === null ? "" : ` with code ${code}`}`;
 }

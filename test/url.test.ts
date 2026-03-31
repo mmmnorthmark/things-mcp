@@ -1,8 +1,10 @@
 import { test, expect, describe } from "vitest";
 import {
   _parseXcallOutput,
+  _buildProcessError,
   buildUrl,
   buildJsonUrl,
+  redactAuthToken,
   requireAuthToken,
   toDirectUrl,
 } from "../src/url.js";
@@ -273,6 +275,25 @@ describe("toDirectUrl", () => {
   });
 });
 
+describe("redactAuthToken", () => {
+  test("redacts auth token from update URL", () => {
+    const url = buildUrl("update", { id: "abc123", title: "Updated" }, "secret-token");
+    expect(redactAuthToken(url)).toContain("auth-token=[REDACTED]");
+    expect(redactAuthToken(url)).not.toContain("secret-token");
+  });
+
+  test("redacts auth token from json URL", () => {
+    const url = buildJsonUrl([{ type: "to-do", operation: "update", id: "abc" }], "secret-token");
+    expect(redactAuthToken(url)).toContain("auth-token=[REDACTED]");
+    expect(redactAuthToken(url)).not.toContain("secret-token");
+  });
+
+  test("leaves URLs without auth token unchanged", () => {
+    const url = buildUrl("show", { id: "today" });
+    expect(redactAuthToken(url)).toBe(url);
+  });
+});
+
 describe("requireAuthToken", () => {
   const originalEnv = process.env.THINGS_AUTH_TOKEN;
 
@@ -322,5 +343,15 @@ describe("_parseXcallOutput", () => {
     const result = _parseXcallOutput("abc123");
     expect(result.thingsId).toBe("abc123");
     expect(result.callbackParams).toBeUndefined();
+  });
+});
+
+describe("_buildProcessError", () => {
+  test("does not leak auth token in error message", () => {
+    const url = buildUrl("update", { id: "abc123" }, "secret-token");
+    const message = _buildProcessError("xcall", 1, `failed to open ${url}`, url);
+    expect(message).not.toContain("secret-token");
+    expect(message).not.toContain("auth-token=");
+    expect(message).toContain("xcall failed with code 1");
   });
 });
