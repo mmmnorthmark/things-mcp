@@ -173,6 +173,13 @@ Here are some things you can ask an AI assistant to do:
 3. If [xcall](https://github.com/martinfinke/xcall) is available, the URL is executed with x-callback-url format to capture response data; otherwise, the URL is executed via the macOS `open` command in direct format (`things:///add?...`)
 4. Things processes the command and creates/updates the item
 
+### Security notes
+
+- Normal runtime is local-only: the server uses stdio, reads the local Things SQLite database, and invokes local macOS tools such as `open`, optional `xcall`, `sqlite3`, and `osascript`.
+- The server does not make outbound network requests during normal runtime.
+- Things requires `auth-token` in URL parameters for update operations. This implementation keeps token-bearing URLs scoped to the process-launch boundary, redacts them from error messages, and avoids shell interpolation for SQLite snapshotting.
+- Residual risk remains that local OS/process inspection may observe child-process argv while an update command is executing.
+
 ### Response capture with xcall (optional)
 
 By default, commands are fire-and-forget — Things processes them but doesn't return data to the server. If you install [xcall](https://github.com/martinfinke/xcall), the server will automatically use it to capture callback data like `x-things-id`, `x-things-ids`, and version fields.
