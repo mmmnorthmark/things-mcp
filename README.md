@@ -228,9 +228,21 @@ Every parameter from the [Things URL scheme documentation](https://culturedcode.
 
 `query`
 
-### batch-json parameters
+### batch-json parameters (Things `json` command)
 
-`items` (array of [Things JSON objects](https://culturedcode.com/things/support/articles/2803573/#json)), `reveal`
+Maps to **`things:///json`** with query parameter **`data`** (JSON array). Full object model is defined in Cultured Code’s documentation:
+
+**[Things URL Scheme — json (for Developers)](https://culturedcode.com/things/support/articles/2803573/#json)**
+
+| MCP parameter | Things URL | Notes |
+|---------------|------------|--------|
+| `items` | `data` | Top-level array of objects with `type` (`to-do`, `project`, `heading`, `checklist-item`), optional `operation` (`create` default, `update`), `id` when updating, and `attributes`. |
+| `reveal` | `reveal` | Optional boolean; open the first created item in Things. |
+| *(env)* `THINGS_AUTH_TOKEN` | `auth-token` | **Required** if **any** object in the tree uses `"operation": "update"`. For create-only payloads the token is optional but is still sent when set. |
+
+**Callbacks (xcall):** On success, Things may return **`x-things-ids`** — a JSON array of IDs for top-level created items (nested to-dos inside a project are not all listed individually; see the article). The MCP tool surfaces `x-*` callback fields in its reply when xcall is installed.
+
+**URL size:** The server rejects URLs above **1,000,000 characters** with a clear error so you can split very large imports into smaller batches.
 
 Before opening Things, the server validates the payload against the same structural rules as [ThingsJSONCoder](https://github.com/culturedcode/ThingsJSONCoder) (top-level types, nesting, `operation`/`id`). Failed validation returns an error with paths and hints — it does not invoke Things.
 
