@@ -528,7 +528,8 @@ function registerBatchJson(server: McpServer): void {
       description:
         "Bulk create, update, or restructure data in Things 3 using the official `things:///json` command (JSON in the `data` parameter). " +
         "Use this for multi-item or batch changes: projects with headings and nested to-dos, checklist updates, many to-dos at once, or mixed create/update operations. " +
-        "Requires THINGS_AUTH_TOKEN when the payload includes any `operation`: \"update\". " +
+        "THINGS_AUTH_TOKEN is required if any object in the payload uses operation `update` (anywhere in the tree). " +
+        "With xcall installed, x-success returns `x-things-ids` (JSON array of top-level created IDs). " +
         "See resource `things://docs/things-json-schema` and https://culturedcode.com/things/support/articles/2803573/#json",
       inputSchema: {
         items: z
