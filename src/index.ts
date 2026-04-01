@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerTools } from "./tools.js";
 import { registerReadTools } from "./read-tools.js";
+import { registerThingsResources } from "./things-resources.js";
 import { initSql } from "./sqlite-adapter.js";
 
 await initSql();
@@ -13,6 +14,7 @@ const server = new McpServer({
   version: "0.1.0",
 });
 
+registerThingsResources(server);
 registerTools(server);
 registerReadTools(server);
 

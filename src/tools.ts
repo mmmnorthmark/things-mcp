@@ -1,6 +1,15 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { buildUrl, buildJsonUrl, executeUrl, requireAuthToken, getAuthToken } from "./url.js";
+import {
+  buildUrl,
+  buildJsonUrl,
+  executeUrl,
+  requireAuthToken,
+  getAuthToken,
+  jsonPayloadRequiresAuthToken,
+  type ExecuteResult,
+} from "./url.js";
+import { validateThingsJsonItems } from "./things-json-validate.js";
 
 export function registerTools(server: McpServer): void {
   registerAddTodo(server);
@@ -525,37 +534,90 @@ function registerBatchJson(server: McpServer): void {
         items: z
           .array(z.record(z.string(), z.any()))
           .describe(
-            "Array of Things JSON objects. Each object needs 'type' ('to-do', 'project', 'heading', 'checklist-item') " +
-            "and 'attributes' (with 'title', etc.). For updates, include 'operation': 'update' and 'id'.",
+            "Array for Things `data` — each object has `type`, `attributes`, and optional `operation` / `id` for updates. " +
+            "Top-level types are only `to-do` and `project` (ThingsJSONCoder). See resource things://docs/things-json-schema.",
           ),
         reveal: z
           .boolean()
           .optional()
-          .describe("Navigate to the first created item"),
+          .describe(
+            "Maps to Things `reveal` — navigate to the first created to-do or project when true",
+          ),
       },
     },
     async (params) => {
-      // Auto-detect if any items are update operations
-      const hasUpdates = params.items.some(
-        (item) => item["operation"] === "update",
-      );
-      const authToken = hasUpdates ? requireAuthToken() : getAuthToken();
+      const validation = validateThingsJsonItems(params.items);
+      if (!validation.ok) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: formatThingsJsonValidationErrors(validation.errors),
+            },
+          ],
+          isError: true,
+        };
+      }
 
-      const url = buildJsonUrl(params.items, authToken ?? undefined, params.reveal);
-      const result = await executeUrl(url);
+      try {
+        const hasUpdates = jsonPayloadRequiresAuthToken(params.items);
+        const authToken = hasUpdates ? requireAuthToken() : getAuthToken();
 
-      const count = params.items.length;
-      const idInfo = result.thingsId ? ` (IDs: ${result.thingsId})` : "";
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Processed ${count} item${count === 1 ? "" : "s"}${idInfo}`,
-          },
-        ],
-      };
+        const url = buildJsonUrl(params.items, authToken ?? undefined, params.reveal);
+        const result = await executeUrl(url);
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: formatBatchJsonToolResponse(result, params.items.length),
+            },
+          ],
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: err instanceof Error ? err.message : String(err),
+            },
+          ],
+          isError: true,
+        };
+      }
     },
   );
+}
+
+function formatThingsJsonValidationErrors(errors: string[]): string {
+  return (
+    "Things JSON validation failed before sending to Things. " +
+      "Fix the payload so it matches ThingsJSONCoder / the official `json` command (see resource things://docs/things-json-schema):\n\n" +
+    errors.map((e) => `- ${e}`).join("\n")
+  );
+}
+
+function formatBatchJsonToolResponse(result: ExecuteResult, topLevelCount: number): string {
+  const lines: string[] = [];
+  lines.push(
+    `Processed ${topLevelCount} top-level object${topLevelCount === 1 ? "" : "s"} via the json command.`,
+  );
+  const xParams = result.callbackParams
+    ? Object.entries(result.callbackParams).filter(([key]) => key.startsWith("x-"))
+    : [];
+  if (xParams.length > 0) {
+    lines.push("", "x-callback parameters:");
+    for (const [key, value] of xParams.sort(([a], [b]) => a.localeCompare(b))) {
+      lines.push(`  ${key}: ${value}`);
+    }
+  } else if (result.thingsId) {
+    lines.push(`Things callback: ${result.thingsId}`);
+  } else {
+    lines.push(
+      "(No x-callback data — install xcall to capture x-things-ids and other callback fields.)",
+    );
+  }
+  return lines.join("\n");
 }
 
 async function getAppVersion(): Promise<string> {

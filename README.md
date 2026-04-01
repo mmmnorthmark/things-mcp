@@ -160,7 +160,7 @@ Here are some things you can ask an AI assistant to do:
 - "Create a project called 'Home Renovation' with tasks for each room"
 - "Schedule my task for tomorrow evening with a deadline of Friday"
 - "Mark task XYZ as completed" (needs auth token)
-- "Create 10 tasks for my weekly review using the JSON tool"
+- "Create 10 tasks for my weekly review using the batch-json tool"
 
 ## How it works
 
@@ -232,7 +232,9 @@ Every parameter from the [Things URL scheme documentation](https://culturedcode.
 
 `items` (array of [Things JSON objects](https://culturedcode.com/things/support/articles/2803573/#json)), `reveal`
 
-The MCP resource **`things://docs/things-json-schema`** summarizes the structure expected by Things (aligned with [ThingsJSONCoder](https://github.com/culturedcode/ThingsJSONCoder)).
+Before opening Things, the server validates the payload against the same structural rules as [ThingsJSONCoder](https://github.com/culturedcode/ThingsJSONCoder) (top-level types, nesting, `operation`/`id`). Failed validation returns an error with paths and hints — it does not invoke Things.
+
+The MCP resource **`things://docs/things-json-schema`** is an agent-oriented summary of the schema (derived from ThingsJSONCoder and the official URL docs).
 
 ## Development
 

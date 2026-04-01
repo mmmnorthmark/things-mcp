@@ -7,6 +7,8 @@ import {
   redactAuthToken,
   requireAuthToken,
   toDirectUrl,
+  jsonPayloadRequiresAuthToken,
+  MAX_THINGS_JSON_URL_LENGTH,
 } from "../src/url.js";
 
 describe("buildUrl", () => {
@@ -246,6 +248,57 @@ describe("buildJsonUrl", () => {
     const decoded = JSON.parse(decodeURIComponent(dataParam));
     expect(decoded[0].attributes["checklist-items"]).toHaveLength(2);
   });
+
+  test("encodes unicode titles and round-trips", () => {
+    const items = [{ type: "to-do", attributes: { title: "Buy crépes" } }];
+    const url = buildJsonUrl(items);
+    const dataParam = url.split("data=")[1]!.split("&")[0]!;
+    const decoded = JSON.parse(decodeURIComponent(dataParam));
+    expect(decoded[0].attributes.title).toBe("Buy crépes");
+  });
+
+  test("throws when json URL exceeds maximum length", () => {
+    const items = [
+      {
+        type: "to-do",
+        attributes: { title: "x".repeat(MAX_THINGS_JSON_URL_LENGTH) },
+      },
+    ];
+    expect(() => buildJsonUrl(items)).toThrow(/exceeds maximum length/);
+  });
+});
+
+describe("jsonPayloadRequiresAuthToken", () => {
+  test("false for create-only top-level array", () => {
+    expect(
+      jsonPayloadRequiresAuthToken([
+        { type: "to-do", attributes: { title: "A" } },
+        { type: "project", attributes: { title: "P" } },
+      ]),
+    ).toBe(false);
+  });
+
+  test("true when top-level item has operation update", () => {
+    expect(
+      jsonPayloadRequiresAuthToken([
+        { type: "to-do", operation: "update", id: "abc", attributes: {} },
+      ]),
+    ).toBe(true);
+  });
+
+  test("true when nested project item has operation update", () => {
+    expect(
+      jsonPayloadRequiresAuthToken([
+        {
+          type: "project",
+          attributes: {
+            title: "P",
+            items: [{ type: "to-do", operation: "update", id: "nested", attributes: {} }],
+          },
+        },
+      ]),
+    ).toBe(true);
+  });
 });
 
 describe("toDirectUrl", () => {
@@ -333,10 +386,16 @@ describe("_parseXcallOutput", () => {
     expect(result.thingsId).toBe("abc123");
   });
 
-  test("parses callback JSON with x-things-ids", () => {
+  test("parses callback JSON with x-things-ids string", () => {
     const result = _parseXcallOutput('{"x-things-ids":"one,two"}');
     expect(result.callbackParams?.["x-things-ids"]).toBe("one,two");
     expect(result.thingsId).toBe("one,two");
+  });
+
+  test("parses callback JSON with x-things-ids as JSON array", () => {
+    const result = _parseXcallOutput('{"x-things-ids":["a","b"]}');
+    expect(result.callbackParams?.["x-things-ids"]).toBe('["a","b"]');
+    expect(result.thingsId).toBe('["a","b"]');
   });
 
   test("falls back to raw output", () => {

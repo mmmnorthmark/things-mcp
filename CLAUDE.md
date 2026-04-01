@@ -37,6 +37,10 @@ The **`batch-updates` branch** is scoped around that command, documented here:
 - **MCP tool `batch-json`** (`src/tools.ts`) accepts the payload as **`items`** (the same array that goes in `data`), optional **`reveal`**, and supplies **`THINGS_AUTH_TOKEN`** when updates are present (or when a token is available for authenticated flows).
 - Callback parsing should preserve **`x-things-ids`** (and related fields) from Things, consistent with other tools.
 
+**Validation:** Before executing the URL, **`batch-json`** runs **`validateThingsJsonItems()`** (`src/things-json-validate.ts`) so payloads match the structural rules encoded in [ThingsJSONCoder](https://github.com/culturedcode/ThingsJSONCoder) (top-level types, nesting, keys). Failures return **`isError`** with paths and hints; Things is not opened.
+
+**Resource:** MCP resource **`things://docs/things-json-schema`** (`resources/things-json-schema.md`) gives agents a concise schema summary.
+
 Work on this feature means **staying aligned with that documentation** (parameters, encoding, auth rules, and callback fields) — not inventing a parallel format.
 
 ## MCP and Things behavior

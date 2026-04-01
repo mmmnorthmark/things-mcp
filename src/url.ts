@@ -22,6 +22,30 @@ export interface ExecuteResult {
 const AUTH_TOKEN_PARAM = "auth-token";
 
 /**
+ * Maximum length for a `things:///json?...` URL built by this server.
+ * Extremely long URLs may be rejected by the OS or Things; split large imports into batches.
+ */
+export const MAX_THINGS_JSON_URL_LENGTH = 1_000_000;
+
+/**
+ * Whether a JSON command payload requires `auth-token` per Cultured Code:
+ * whenever any object in the tree has `operation: "update"`.
+ */
+export function jsonPayloadRequiresAuthToken(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some((entry) => jsonPayloadRequiresAuthToken(entry));
+  }
+  if (value !== null && typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    if (o["operation"] === "update") {
+      return true;
+    }
+    return Object.values(o).some((v) => jsonPayloadRequiresAuthToken(v));
+  }
+  return false;
+}
+
+/**
  * Build a Things URL scheme URL from a command and parameters.
  * Pure function — no side effects, fully testable.
  */
@@ -70,7 +94,14 @@ export function buildJsonUrl(
     parts.push("reveal=true");
   }
 
-  return `things:///x-callback-url/json?${parts.join("&")}`;
+  const url = `things:///x-callback-url/json?${parts.join("&")}`;
+  if (url.length > MAX_THINGS_JSON_URL_LENGTH) {
+    throw new Error(
+      `things json command URL exceeds maximum length (${url.length} > ${MAX_THINGS_JSON_URL_LENGTH} characters). ` +
+        "Split the payload into smaller batches. See Things URL scheme documentation for the json command.",
+    );
+  }
+  return url;
 }
 
 /**
@@ -143,6 +174,13 @@ function executeWithXcall(url: string): Promise<ExecuteResult> {
   });
 }
 
+function stringifyCallbackParamValue(value: unknown): string {
+  if (typeof value === "object" && value !== null) {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
 function parseXcallOutput(rawOutput: string): ExecuteResult {
   if (!rawOutput) {
     return { success: true };
@@ -154,7 +192,7 @@ function parseXcallOutput(rawOutput: string): ExecuteResult {
       const callbackParams = Object.fromEntries(
         Object.entries(parsed)
           .filter(([, value]) => value !== undefined && value !== null)
-          .map(([key, value]) => [key, String(value)]),
+          .map(([key, value]) => [key, stringifyCallbackParamValue(value)]),
       );
       const thingsId = callbackParams["x-things-id"] ?? callbackParams["x-things-ids"];
       return { success: true, callbackParams, thingsId };
