@@ -80,6 +80,7 @@ export interface TodoFilters {
   search?: string;
   status?: "open" | "completed" | "canceled";
   limit?: number;
+  offset?: number;
 }
 
 export interface ProjectFilters {
@@ -87,6 +88,12 @@ export interface ProjectFilters {
   areaId?: string;
   search?: string;
   limit?: number;
+  offset?: number;
+}
+
+export interface PaginatedResult<T> {
+  items: T[];
+  totalCount: number;
 }
 
 // --- Date Utilities ---
@@ -217,11 +224,12 @@ function mapStart(start: number | null): "inbox" | "anytime" | "someday" | null 
 
 // --- Query Functions ---
 
-export function queryTodos(filters: TodoFilters = {}): Todo[] {
+export function queryTodos(filters: TodoFilters = {}): PaginatedResult<Todo> {
   const database = getDb();
   const conditions: string[] = ["t.type = 0", "t.rt1_recurrenceRule IS NULL"];
   const params: Record<string, string | number> = {};
-  const limit = filters.limit ?? 50;
+  const limit = filters.limit ?? 20;
+  const offset = filters.offset ?? 0;
 
   if (filters.list !== "trash") {
     conditions.push("t.trashed = 0");
@@ -289,6 +297,19 @@ export function queryTodos(filters: TodoFilters = {}): Todo[] {
     conditions.push("(t.title LIKE $search OR t.notes LIKE $search)");
   }
 
+  const whereClause = conditions.join(" AND ");
+  const fromClause = `
+    FROM TMTask t
+    LEFT JOIN TMTask p ON t.project = p.uuid
+    LEFT JOIN TMArea a ON COALESCE(t.area, p.area) = a.uuid
+    LEFT JOIN TMTask h ON t.heading = h.uuid AND h.type = 2`;
+
+  const countRow = database.get<{ count: number }>(
+    `SELECT COUNT(*) AS count ${fromClause} WHERE ${whereClause}`,
+    params,
+  );
+  const totalCount = countRow?.count ?? 0;
+
   let orderBy = "t.todayIndex ASC, t.creationDate DESC";
   if (filters.list === "logbook") {
     orderBy = "t.stopDate DESC";
@@ -303,24 +324,25 @@ export function queryTodos(filters: TodoFilters = {}): Todo[] {
       t.heading AS headingId, h.title AS headingTitle,
       t.creationDate, t.userModificationDate AS modificationDate,
       t.stopDate AS completionDate
-    FROM TMTask t
-    LEFT JOIN TMTask p ON t.project = p.uuid
-    LEFT JOIN TMArea a ON COALESCE(t.area, p.area) = a.uuid
-    LEFT JOIN TMTask h ON t.heading = h.uuid AND h.type = 2
-    WHERE ${conditions.join(" AND ")}
+    ${fromClause}
+    WHERE ${whereClause}
     ORDER BY ${orderBy}
-    LIMIT $limit
+    LIMIT $limit OFFSET $offset
   `;
   params.limit = limit;
+  params.offset = offset;
 
   const rows = database.all<RawTodoRow>(sql, params);
   const uuids = rows.map((r) => r.uuid);
-  if (uuids.length === 0) return [];
+  if (uuids.length === 0) return { items: [], totalCount };
 
   const tagsMap = batchLoadTags(database, uuids);
   const checklistMap = batchLoadChecklists(database, uuids);
 
-  return rows.map((r) => formatTodo(r, tagsMap, checklistMap));
+  return {
+    items: rows.map((r) => formatTodo(r, tagsMap, checklistMap)),
+    totalCount,
+  };
 }
 
 export function queryTodoById(uuid: string): Todo | null {
@@ -350,11 +372,12 @@ export function queryTodoById(uuid: string): Todo | null {
   return formatTodo(row, tagsMap, checklistMap);
 }
 
-export function queryProjects(filters: ProjectFilters = {}): Project[] {
+export function queryProjects(filters: ProjectFilters = {}): PaginatedResult<Project> {
   const database = getDb();
   const conditions: string[] = ["t.type = 1", "t.trashed = 0"];
   const params: Record<string, string | number> = {};
-  const limit = filters.limit ?? 50;
+  const limit = filters.limit ?? 20;
+  const offset = filters.offset ?? 0;
 
   if (filters.status) {
     const statusMap = { open: 0, completed: 3, canceled: 2 };
@@ -372,6 +395,15 @@ export function queryProjects(filters: ProjectFilters = {}): Project[] {
     conditions.push("(t.title LIKE $search OR t.notes LIKE $search)");
   }
 
+  const whereClause = conditions.join(" AND ");
+  const fromClause = `FROM TMTask t LEFT JOIN TMArea a ON t.area = a.uuid`;
+
+  const countRow = database.get<{ count: number }>(
+    `SELECT COUNT(*) AS count ${fromClause} WHERE ${whereClause}`,
+    params,
+  );
+  const totalCount = countRow?.count ?? 0;
+
   const sql = `
     SELECT
       t.uuid, t.title, t.notes, t.status, t.start,
@@ -381,21 +413,24 @@ export function queryProjects(filters: ProjectFilters = {}): Project[] {
       t.stopDate AS completionDate,
       (SELECT COUNT(*) FROM TMTask c WHERE c.project = t.uuid AND c.type = 0 AND c.trashed = 0 AND c.status = 0) AS openTodoCount,
       (SELECT COUNT(*) FROM TMTask c WHERE c.project = t.uuid AND c.type = 0 AND c.trashed = 0) AS totalTodoCount
-    FROM TMTask t
-    LEFT JOIN TMArea a ON t.area = a.uuid
-    WHERE ${conditions.join(" AND ")}
+    ${fromClause}
+    WHERE ${whereClause}
     ORDER BY t.todayIndex ASC, t.creationDate DESC
-    LIMIT $limit
+    LIMIT $limit OFFSET $offset
   `;
   params.limit = limit;
+  params.offset = offset;
 
   const rows = database.all<RawProjectRow>(sql, params);
   const uuids = rows.map((r) => r.uuid);
-  if (uuids.length === 0) return [];
+  if (uuids.length === 0) return { items: [], totalCount };
 
   const tagsMap = batchLoadTags(database, uuids);
 
-  return rows.map((r) => formatProject(r, tagsMap));
+  return {
+    items: rows.map((r) => formatProject(r, tagsMap)),
+    totalCount,
+  };
 }
 
 export function queryProjectById(uuid: string): ProjectDetail | null {

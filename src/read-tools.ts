@@ -8,7 +8,7 @@ import {
   queryAreas,
   queryTags,
 } from "./db.js";
-import type { TodoList } from "./db.js";
+import type { TodoList, PaginatedResult } from "./db.js";
 
 export function registerReadTools(server: McpServer): void {
   registerGetTodos(server);
@@ -19,6 +19,16 @@ export function registerReadTools(server: McpServer): void {
   registerGetTags(server);
 }
 
+function paginatedResponse<T>(result: PaginatedResult<T>, limit: number, offset: number): object {
+  return {
+    items: result.items,
+    totalCount: result.totalCount,
+    limit,
+    offset,
+    hasMore: offset + result.items.length < result.totalCount,
+  };
+}
+
 // --- get-todos ---
 
 function registerGetTodos(server: McpServer): void {
@@ -27,7 +37,8 @@ function registerGetTodos(server: McpServer): void {
     {
       description:
         "Get to-dos from Things 3 by reading the database directly. " +
-        "Returns data inline — no need to open the app. " +
+        "Returns paginated results — use offset and limit to page through large result sets. " +
+        "When hasMore is true, increase offset by limit to fetch the next page. " +
         "Filter by list (inbox, today, anytime, someday, upcoming, logbook, trash), project, area, tag, or search text.",
       inputSchema: {
         list: z
@@ -42,23 +53,27 @@ function registerGetTodos(server: McpServer): void {
           .optional()
           .describe("Filter by status (default: depends on list)"),
         search: z.string().optional().describe("Search in title and notes"),
-        limit: z.number().optional().describe("Max results to return (default 50)"),
+        limit: z.number().optional().describe("Max results per page (default 20). Use with offset to paginate."),
+        offset: z.number().optional().describe("Number of results to skip (default 0). Set to offset + limit from a previous call to get the next page."),
       },
     },
     async (params) => {
       try {
-        const todos = queryTodos({
+        const limit = params.limit ?? 20;
+        const offset = params.offset ?? 0;
+        const result = queryTodos({
           list: params.list as TodoList | undefined,
           projectId: params.projectId,
           areaId: params.areaId,
           tag: params.tag,
           search: params.search,
           status: params.status as "open" | "completed" | "canceled" | undefined,
-          limit: params.limit,
+          limit,
+          offset,
         });
 
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(todos, null, 2) }],
+          content: [{ type: "text" as const, text: JSON.stringify(paginatedResponse(result, limit, offset), null, 2) }],
         };
       } catch (err) {
         return {
@@ -123,7 +138,8 @@ function registerGetProjects(server: McpServer): void {
     {
       description:
         "Get projects from Things 3. " +
-        "Returns project list with open/total to-do counts. " +
+        "Returns paginated results with open/total to-do counts. " +
+        "When hasMore is true, increase offset by limit to fetch the next page. " +
         "Filter by status, area, or search text.",
       inputSchema: {
         status: z
@@ -132,20 +148,24 @@ function registerGetProjects(server: McpServer): void {
           .describe("Filter by project status"),
         areaId: z.string().optional().describe("Filter by area UUID"),
         search: z.string().optional().describe("Search in title and notes"),
-        limit: z.number().optional().describe("Max results to return (default 50)"),
+        limit: z.number().optional().describe("Max results per page (default 20). Use with offset to paginate."),
+        offset: z.number().optional().describe("Number of results to skip (default 0). Set to offset + limit from a previous call to get the next page."),
       },
     },
     async (params) => {
       try {
-        const projects = queryProjects({
+        const limit = params.limit ?? 20;
+        const offset = params.offset ?? 0;
+        const result = queryProjects({
           status: params.status as "open" | "completed" | "canceled" | undefined,
           areaId: params.areaId,
           search: params.search,
-          limit: params.limit,
+          limit,
+          offset,
         });
 
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(projects, null, 2) }],
+          content: [{ type: "text" as const, text: JSON.stringify(paginatedResponse(result, limit, offset), null, 2) }],
         };
       } catch (err) {
         return {

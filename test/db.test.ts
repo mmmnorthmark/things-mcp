@@ -220,15 +220,23 @@ afterEach(() => {
 // --- queryTodos ---
 
 describe("queryTodos", () => {
+  test("returns PaginatedResult with items and totalCount", () => {
+    const result = queryTodos({ list: "inbox" });
+    expect(result).toHaveProperty("items");
+    expect(result).toHaveProperty("totalCount");
+    expect(Array.isArray(result.items)).toBe(true);
+    expect(typeof result.totalCount).toBe("number");
+  });
+
   test("inbox returns tasks with start=0", () => {
-    const todos = queryTodos({ list: "inbox" });
-    expect(todos.length).toBe(2);
-    expect(todos.every((t) => t.start === "inbox")).toBe(true);
+    const { items } = queryTodos({ list: "inbox" });
+    expect(items.length).toBe(2);
+    expect(items.every((t) => t.start === "inbox")).toBe(true);
   });
 
   test("today returns regular today, scheduled-someday, and overdue-deadline tasks", () => {
-    const todos = queryTodos({ list: "today" });
-    const uuids = todos.map((t) => t.uuid);
+    const { items } = queryTodos({ list: "today" });
+    const uuids = items.map((t) => t.uuid);
     // Regular today: start=1 + startDate set
     expect(uuids).toContain("todo-today-1");
     expect(uuids).toContain("todo-today-2");
@@ -243,9 +251,9 @@ describe("queryTodos", () => {
   });
 
   test("anytime returns open tasks with start=1", () => {
-    const todos = queryTodos({ list: "anytime" });
-    const uuids = todos.map((t) => t.uuid);
-    expect(todos.every((t) => t.start === "anytime")).toBe(true);
+    const { items } = queryTodos({ list: "anytime" });
+    const uuids = items.map((t) => t.uuid);
+    expect(items.every((t) => t.start === "anytime")).toBe(true);
     expect(uuids).toContain("todo-anytime-1");
     // Today tasks also appear in anytime (lists are not mutually exclusive)
     expect(uuids).toContain("todo-today-1");
@@ -256,8 +264,8 @@ describe("queryTodos", () => {
   });
 
   test("someday returns tasks with start=2 and no startDate", () => {
-    const todos = queryTodos({ list: "someday" });
-    const uuids = todos.map((t) => t.uuid);
+    const { items } = queryTodos({ list: "someday" });
+    const uuids = items.map((t) => t.uuid);
     expect(uuids).toContain("todo-someday-1");
     // Scheduled someday tasks should NOT appear (they belong in today or upcoming)
     expect(uuids).not.toContain("todo-someday-scheduled");
@@ -265,85 +273,108 @@ describe("queryTodos", () => {
   });
 
   test("upcoming returns tasks with start=2 and future startDate", () => {
-    const todos = queryTodos({ list: "upcoming" });
-    const uuids = todos.map((t) => t.uuid);
+    const { items } = queryTodos({ list: "upcoming" });
+    const uuids = items.map((t) => t.uuid);
     expect(uuids).toContain("todo-upcoming-1");
     // Past-scheduled someday should NOT appear (belongs in today)
     expect(uuids).not.toContain("todo-someday-scheduled");
   });
 
   test("logbook returns completed and canceled tasks", () => {
-    const todos = queryTodos({ list: "logbook" });
-    const uuids = todos.map((t) => t.uuid);
+    const { items } = queryTodos({ list: "logbook" });
+    const uuids = items.map((t) => t.uuid);
     expect(uuids).toContain("todo-completed-1");
     expect(uuids).toContain("todo-canceled-1");
   });
 
   test("trash returns trashed tasks", () => {
-    const todos = queryTodos({ list: "trash" });
-    expect(todos.length).toBe(1);
-    expect(todos[0]!.uuid).toBe("todo-trashed-1");
+    const { items } = queryTodos({ list: "trash" });
+    expect(items.length).toBe(1);
+    expect(items[0]!.uuid).toBe("todo-trashed-1");
   });
 
   test("excludes trashed tasks by default", () => {
-    const todos = queryTodos({});
-    const uuids = todos.map((t) => t.uuid);
+    const { items } = queryTodos({});
+    const uuids = items.map((t) => t.uuid);
     expect(uuids).not.toContain("todo-trashed-1");
   });
 
   test("excludes recurring task templates", () => {
-    const todos = queryTodos({});
-    const uuids = todos.map((t) => t.uuid);
+    const { items } = queryTodos({});
+    const uuids = items.map((t) => t.uuid);
     expect(uuids).not.toContain("todo-recurring-1");
   });
 
   test("excludes headings (type=2)", () => {
-    const todos = queryTodos({});
-    const uuids = todos.map((t) => t.uuid);
+    const { items } = queryTodos({});
+    const uuids = items.map((t) => t.uuid);
     expect(uuids).not.toContain("heading-1");
     expect(uuids).not.toContain("heading-2");
   });
 
   test("filter by projectId", () => {
-    const todos = queryTodos({ projectId: "proj-1" });
-    expect(todos.length).toBe(2);
-    expect(todos.every((t) => t.projectId === "proj-1")).toBe(true);
+    const { items } = queryTodos({ projectId: "proj-1" });
+    expect(items.length).toBe(2);
+    expect(items.every((t) => t.projectId === "proj-1")).toBe(true);
   });
 
   test("filter by areaId", () => {
-    const todos = queryTodos({ areaId: "area-work" });
-    expect(todos.length).toBeGreaterThanOrEqual(1);
+    const { items } = queryTodos({ areaId: "area-work" });
+    expect(items.length).toBeGreaterThanOrEqual(1);
     // Should include todo-today-1 which is in proj-2 (area-work)
-    const uuids = todos.map((t) => t.uuid);
+    const uuids = items.map((t) => t.uuid);
     expect(uuids).toContain("todo-today-1");
   });
 
   test("filter by search", () => {
-    const todos = queryTodos({ search: "groceries" });
-    expect(todos.length).toBe(1);
-    expect(todos[0]!.uuid).toBe("todo-inbox-1");
+    const { items } = queryTodos({ search: "groceries" });
+    expect(items.length).toBe(1);
+    expect(items[0]!.uuid).toBe("todo-inbox-1");
   });
 
   test("search also matches notes", () => {
-    const todos = queryTodos({ search: "chapter 5" });
-    expect(todos.length).toBe(1);
-    expect(todos[0]!.uuid).toBe("todo-anytime-1");
+    const { items } = queryTodos({ search: "chapter 5" });
+    expect(items.length).toBe(1);
+    expect(items[0]!.uuid).toBe("todo-anytime-1");
   });
 
-  test("limit constrains results", () => {
-    const todos = queryTodos({ limit: 2 });
-    expect(todos.length).toBeLessThanOrEqual(2);
+  test("limit constrains items returned", () => {
+    const result = queryTodos({ limit: 2 });
+    expect(result.items.length).toBeLessThanOrEqual(2);
+  });
+
+  test("totalCount reflects full result set regardless of limit", () => {
+    const full = queryTodos({ list: "inbox" });
+    const limited = queryTodos({ list: "inbox", limit: 1 });
+    expect(limited.items.length).toBe(1);
+    expect(limited.totalCount).toBe(full.totalCount);
+    expect(limited.totalCount).toBe(2);
+  });
+
+  test("offset skips results", () => {
+    const first = queryTodos({ list: "inbox", limit: 1, offset: 0 });
+    const second = queryTodos({ list: "inbox", limit: 1, offset: 1 });
+    expect(first.items.length).toBe(1);
+    expect(second.items.length).toBe(1);
+    expect(first.items[0]!.uuid).not.toBe(second.items[0]!.uuid);
+    expect(first.totalCount).toBe(second.totalCount);
+  });
+
+  test("offset beyond results returns empty items with correct totalCount", () => {
+    const result = queryTodos({ list: "inbox", offset: 100 });
+    expect(result.items.length).toBe(0);
+    expect(result.totalCount).toBe(2);
   });
 
   test("includes tags via batch loading", () => {
-    const todos = queryTodos({ list: "inbox" });
-    const grocery = todos.find((t) => t.uuid === "todo-inbox-1");
+    const { items } = queryTodos({ list: "inbox" });
+    const grocery = items.find((t) => t.uuid === "todo-inbox-1");
     expect(grocery!.tags).toContain("errand");
   });
 
   test("includes checklist items via batch loading", () => {
-    const todos = queryTodos({ list: "inbox" });
-    const grocery = todos.find((t) => t.uuid === "todo-inbox-1");
+    const { items } = queryTodos({ list: "inbox" });
+    const grocery = items.find((t) => t.uuid === "todo-inbox-1");
     expect(grocery!.checklistItems.length).toBe(3);
     expect(grocery!.checklistItems[0]!.title).toBe("Milk");
     expect(grocery!.checklistItems[0]!.completed).toBe(false);
@@ -352,8 +383,8 @@ describe("queryTodos", () => {
   });
 
   test("includes project and area info", () => {
-    const todos = queryTodos({ list: "today" });
-    const review = todos.find((t) => t.uuid === "todo-today-1");
+    const { items } = queryTodos({ list: "today" });
+    const review = items.find((t) => t.uuid === "todo-today-1");
     expect(review!.projectId).toBe("proj-2");
     expect(review!.projectTitle).toBe("Work Project");
   });
@@ -400,45 +431,66 @@ describe("queryTodoById", () => {
 // --- queryProjects ---
 
 describe("queryProjects", () => {
+  test("returns PaginatedResult with items and totalCount", () => {
+    const result = queryProjects();
+    expect(result).toHaveProperty("items");
+    expect(result).toHaveProperty("totalCount");
+    expect(Array.isArray(result.items)).toBe(true);
+  });
+
   test("returns open projects by default (no status filter)", () => {
-    const projects = queryProjects();
+    const { items } = queryProjects();
     // Returns all non-trashed projects (open + completed)
-    expect(projects.length).toBeGreaterThanOrEqual(2);
+    expect(items.length).toBeGreaterThanOrEqual(2);
   });
 
   test("filter by status=open", () => {
-    const projects = queryProjects({ status: "open" });
-    expect(projects.every((p) => p.status === "open")).toBe(true);
-    expect(projects.length).toBe(2);
+    const { items } = queryProjects({ status: "open" });
+    expect(items.every((p) => p.status === "open")).toBe(true);
+    expect(items.length).toBe(2);
   });
 
   test("filter by status=completed", () => {
-    const projects = queryProjects({ status: "completed" });
-    expect(projects.length).toBe(1);
-    expect(projects[0]!.uuid).toBe("proj-done");
+    const { items } = queryProjects({ status: "completed" });
+    expect(items.length).toBe(1);
+    expect(items[0]!.uuid).toBe("proj-done");
   });
 
   test("filter by areaId", () => {
-    const projects = queryProjects({ areaId: "area-work" });
-    const uuids = projects.map((p) => p.uuid);
+    const { items } = queryProjects({ areaId: "area-work" });
+    const uuids = items.map((p) => p.uuid);
     expect(uuids).toContain("proj-2");
   });
 
   test("filter by search", () => {
-    const projects = queryProjects({ search: "Renovation" });
-    expect(projects.length).toBe(1);
-    expect(projects[0]!.uuid).toBe("proj-1");
+    const { items } = queryProjects({ search: "Renovation" });
+    expect(items.length).toBe(1);
+    expect(items[0]!.uuid).toBe("proj-1");
   });
 
   test("includes todo counts", () => {
-    const projects = queryProjects({ search: "Renovation" });
-    expect(projects[0]!.openTodoCount).toBe(2);
-    expect(projects[0]!.totalTodoCount).toBe(2);
+    const { items } = queryProjects({ search: "Renovation" });
+    expect(items[0]!.openTodoCount).toBe(2);
+    expect(items[0]!.totalTodoCount).toBe(2);
   });
 
-  test("limit constrains results", () => {
-    const projects = queryProjects({ limit: 1 });
-    expect(projects.length).toBe(1);
+  test("limit constrains items returned", () => {
+    const result = queryProjects({ limit: 1 });
+    expect(result.items.length).toBe(1);
+  });
+
+  test("totalCount reflects full result set regardless of limit", () => {
+    const full = queryProjects();
+    const limited = queryProjects({ limit: 1 });
+    expect(limited.items.length).toBe(1);
+    expect(limited.totalCount).toBe(full.totalCount);
+  });
+
+  test("offset skips results", () => {
+    const first = queryProjects({ limit: 1, offset: 0 });
+    const second = queryProjects({ limit: 1, offset: 1 });
+    expect(first.items[0]!.uuid).not.toBe(second.items[0]!.uuid);
+    expect(first.totalCount).toBe(second.totalCount);
   });
 });
 
