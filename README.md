@@ -130,7 +130,7 @@ The auth token is only needed for **updating** existing items (not for creating 
 |---|---|
 | `add-todo` | Create a to-do with title, notes, tags, checklist, scheduling, and more |
 | `add-project` | Create a project with optional child to-dos |
-| `add-json` | Bulk create/update using the [Things JSON format](https://culturedcode.com/things/support/articles/2803573/#json) — the most powerful tool |
+| `batch-json` | Bulk create/update via the [`json` URL command](https://culturedcode.com/things/support/articles/2803573/#json) — structured batch changes (see resource `things://docs/things-json-schema`) |
 
 ### Updating (requires auth token)
 
@@ -228,9 +228,11 @@ Every parameter from the [Things URL scheme documentation](https://culturedcode.
 
 `query`
 
-### add-json parameters
+### batch-json parameters
 
 `items` (array of [Things JSON objects](https://culturedcode.com/things/support/articles/2803573/#json)), `reveal`
+
+The MCP resource **`things://docs/things-json-schema`** summarizes the structure expected by Things (aligned with [ThingsJSONCoder](https://github.com/culturedcode/ThingsJSONCoder)).
 
 ## Development
 

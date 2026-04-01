@@ -211,7 +211,7 @@ describe("search parameter mapping", () => {
   });
 });
 
-describe("add-json parameter mapping", () => {
+describe("batch-json parameter mapping", () => {
   test("creates JSON URL for todo items", () => {
     const items = [
       { type: "to-do", attributes: { title: "Task 1" } },

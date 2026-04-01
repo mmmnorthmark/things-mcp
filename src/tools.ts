@@ -10,7 +10,7 @@ export function registerTools(server: McpServer): void {
   registerShow(server);
   registerSearch(server);
   registerGetVersion(server);
-  registerAddJson(server);
+  registerBatchJson(server);
 }
 
 // --- add-todo ---
@@ -510,17 +510,17 @@ function registerGetVersion(server: McpServer): void {
   );
 }
 
-// --- add-json ---
+// --- batch-json ---
 
-function registerAddJson(server: McpServer): void {
+function registerBatchJson(server: McpServer): void {
   server.registerTool(
-    "add-json",
+    "batch-json",
     {
       description:
-        "Bulk create or update items in Things 3 using the JSON command. " +
-        "This is the most powerful command — supports creating projects with headings, to-dos with checklists, and nested structures. " +
-        "Auth token is automatically included if set (required for update operations). " +
-        "See https://culturedcode.com/things/support/articles/2803573/ for the full JSON format.",
+        "Bulk create, update, or restructure data in Things 3 using the official `things:///json` command (JSON in the `data` parameter). " +
+        "Use this for multi-item or batch changes: projects with headings and nested to-dos, checklist updates, many to-dos at once, or mixed create/update operations. " +
+        "Requires THINGS_AUTH_TOKEN when the payload includes any `operation`: \"update\". " +
+        "See resource `things://docs/things-json-schema` and https://culturedcode.com/things/support/articles/2803573/#json",
       inputSchema: {
         items: z
           .array(z.record(z.string(), z.any()))
