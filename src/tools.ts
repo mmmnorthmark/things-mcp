@@ -215,7 +215,12 @@ function registerUpdateTodo(server: McpServer): void {
     "update-todo",
     {
       description:
-        "Update an existing to-do in Things 3. Requires THINGS_AUTH_TOKEN.",
+        "Update an existing to-do in Things 3. Requires THINGS_AUTH_TOKEN. " +
+        "Uses patch semantics: omit any field you do not want to change. " +
+        "Warning: empty strings and empty arrays are treated as real values — " +
+        'notes: "", tags: [], checklistItems: [], and deadline: "" will clear existing data. ' +
+        "Titles must never be set to empty, null, or only spaces — they must contain at least one alphanumeric character. " +
+        "Prefer addTags over tags, and appendNotes/prependNotes over notes, to avoid accidental overwrites.",
       inputSchema: {
         id: z.string().describe("ID of the to-do to update"),
         title: z.string().optional().describe("New title"),
@@ -310,7 +315,12 @@ function registerUpdateProject(server: McpServer): void {
     "update-project",
     {
       description:
-        "Update an existing project in Things 3. Requires THINGS_AUTH_TOKEN.",
+        "Update an existing project in Things 3. Requires THINGS_AUTH_TOKEN. " +
+        "Uses patch semantics: omit any field you do not want to change. " +
+        "Warning: empty strings and empty arrays are treated as real values — " +
+        'notes: "", tags: [], and deadline: "" will clear existing data. ' +
+        "Titles must never be set to empty, null, or only spaces — they must contain at least one alphanumeric character. " +
+        "Prefer addTags over tags, and appendNotes/prependNotes over notes, to avoid accidental overwrites.",
       inputSchema: {
         id: z.string().describe("ID of the project to update"),
         title: z.string().optional().describe("New title"),
@@ -529,6 +539,9 @@ function registerBatchJson(server: McpServer): void {
         "Bulk create, update, or restructure data in Things 3 using the official `things:///json` command (JSON in the `data` parameter). " +
         "Use this for multi-item or batch changes: projects with headings and nested to-dos, checklist updates, many to-dos at once, or mixed create/update operations. " +
         "THINGS_AUTH_TOKEN is required if any object in the payload uses operation `update` (anywhere in the tree). " +
+        "For update operations, uses patch semantics: include only the attributes you want to change. " +
+        "Empty strings and empty arrays in attributes will clear existing data. " +
+        "Titles must never be set to empty, null, or only spaces — they must contain at least one alphanumeric character. " +
         "With xcall installed, x-success returns `x-things-ids` (JSON array of top-level created IDs). " +
         "See resource `things://docs/things-json-schema` and https://culturedcode.com/things/support/articles/2803573/#json",
       inputSchema: {
