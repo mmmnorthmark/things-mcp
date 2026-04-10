@@ -2,7 +2,17 @@
 
 MCP server for [Things 3](https://culturedcode.com/things/) on macOS. Exposes the full [Things URL scheme](https://culturedcode.com/things/support/articles/2803573/) as tools — create to-dos, projects, bulk operations, and more. Also reads directly from the Things SQLite database so an AI assistant can query your tasks, projects, areas, and tags without opening the app.
 
-Published as: `@nkootstra/things-mcp`
+> **Fork notice:** This is a fork of [nkootstra/things-mcp](https://github.com/nkootstra/things-mcp). The original package is published as [`@nkootstra/things-mcp`](https://www.npmjs.com/package/@nkootstra/things-mcp).
+
+## Changes in this fork
+
+- **Pagination for read tools** — `get-todos` and `get-projects` return paginated results with `totalCount`, `hasMore`, `limit`, and `offset` metadata. Default page size reduced from 50 to 20 so AI agents get clear signals when more results exist.
+- **Patch semantics warnings** — `update-todo`, `update-project`, and `batch-json` descriptions now warn that empty strings and empty arrays clear existing data, and guide agents toward additive fields (`addTags`, `appendNotes`).
+- **Batch JSON validation** — `batch-json` validates payloads against ThingsJSONCoder structural rules before opening Things. Failures return errors with paths and hints.
+- **Things date encoding fix** — Corrected bit-packed date encoding for `startDate`/`deadline` fields.
+- **List filter fix** — Fixed SQLite query logic for built-in list views.
+- **Auth token redaction** — `auth-token` values are redacted from error messages.
+- **Security hardening** — URL size limit (1M chars), nested update auth enforcement, xcall callback preservation.
 
 ## Requirements
 
@@ -21,7 +31,7 @@ Add to your `~/Library/Application Support/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "things": {
       "command": "npx",
-      "args": ["-y", "@nkootstra/things-mcp"],
+      "args": ["-y", "github:mmmnorthmark/things-mcp"],
       "env": {
         "THINGS_AUTH_TOKEN": "your-auth-token-here"
       }
@@ -37,7 +47,7 @@ Then restart Claude Desktop.
 ### Claude Code
 
 ```bash
-claude mcp add things -- npx -y @nkootstra/things-mcp
+claude mcp add things -- npx -y github:mmmnorthmark/things-mcp
 ```
 
 Set the auth token in your environment:
@@ -51,13 +61,13 @@ export THINGS_AUTH_TOKEN="your-auth-token-here"
 Run directly:
 
 ```bash
-THINGS_AUTH_TOKEN="your-token" npx -y @nkootstra/things-mcp
+THINGS_AUTH_TOKEN="your-token" npx -y github:mmmnorthmark/things-mcp
 ```
 
 Or install globally:
 
 ```bash
-npm install -g @nkootstra/things-mcp
+npm install -g github:mmmnorthmark/things-mcp
 THINGS_AUTH_TOKEN="your-token" things-mcp
 ```
 
@@ -66,13 +76,13 @@ THINGS_AUTH_TOKEN="your-token" things-mcp
 ### 1) Run without installing globally
 
 ```bash
-THINGS_AUTH_TOKEN="your-token" npx -y @nkootstra/things-mcp
+THINGS_AUTH_TOKEN="your-token" npx -y github:mmmnorthmark/things-mcp
 ```
 
 ### 2) Install globally and run
 
 ```bash
-npm install -g @nkootstra/things-mcp
+npm install -g github:mmmnorthmark/things-mcp
 things-mcp
 ```
 
@@ -83,7 +93,7 @@ things-mcp
   "mcpServers": {
     "things": {
       "command": "npx",
-      "args": ["-y", "@nkootstra/things-mcp"],
+      "args": ["-y", "github:mmmnorthmark/things-mcp"],
       "env": {
         "THINGS_AUTH_TOKEN": "your-auth-token-here"
       }
@@ -190,7 +200,7 @@ Every parameter from the [Things URL scheme documentation](https://culturedcode.
 
 ### get-todos parameters
 
-`list` (inbox, today, anytime, someday, upcoming, logbook, trash), `projectId`, `areaId`, `tag`, `status` (open, completed, canceled), `search`, `limit`
+`list` (inbox, today, anytime, someday, upcoming, logbook, trash), `projectId`, `areaId`, `tag`, `status` (open, completed, canceled), `search`, `limit`, `offset`
 
 ### get-todo parameters
 
@@ -198,7 +208,7 @@ Every parameter from the [Things URL scheme documentation](https://culturedcode.
 
 ### get-projects parameters
 
-`status` (open, completed, canceled), `areaId`, `search`, `limit`
+`status` (open, completed, canceled), `areaId`, `search`, `limit`, `offset`
 
 ### get-project parameters
 
@@ -230,7 +240,7 @@ Every parameter from the [Things URL scheme documentation](https://culturedcode.
 
 ### batch-json parameters (Things `json` command)
 
-Maps to **`things:///json`** with query parameter **`data`** (JSON array). Full object model is defined in Cultured Code’s documentation:
+Maps to **`things:///json`** with query parameter **`data`** (JSON array). Full object model is defined in Cultured Code's documentation:
 
 **[Things URL Scheme — json (for Developers)](https://culturedcode.com/things/support/articles/2803573/#json)**
 
@@ -260,11 +270,13 @@ npm run dev
 # Run tests
 npm test
 
-# Build for npm
+# Build
 npm run build
 ```
 
-## CI and npm release automation
+## CI and release (upstream)
+
+> The CI and npm release automation below describes the upstream [nkootstra/things-mcp](https://github.com/nkootstra/things-mcp) workflow. This fork does not publish to npm.
 
 - CI runs on GitHub Actions for all pushes to `main` and all pull requests:
   - `npm ci`
@@ -277,30 +289,6 @@ npm run build
 - npm publishing runs as part of the same `release-please.yml` workflow:
   - When the Release PR is merged and a GitHub Release is created, the workflow continues to build and publish
   - Publishes with provenance to npm (`npm publish --access public --provenance`)
-
-### One-time setup
-
-1. Ensure GitHub Actions are enabled for this repository.
-2. Choose one publish auth method:
-   - Recommended: npm Trusted Publishing for `@nkootstra/things-mcp`
-     - npm → Package Settings → Trusted publishers → add this GitHub repository/workflow.
-   - Token fallback: add repository secret `NPM_TOKEN`
-     - Create an npm automation token with publish access to scope `@nkootstra`.
-     - Add it in GitHub: Settings → Secrets and variables → Actions → New repository secret.
-
-### Normal release flow (fully automated)
-
-1. Merge changes into `main`.
-2. Review and merge the automated Release PR from Release Please.
-3. The same workflow creates the GitHub Release, builds the package, and publishes to npm.
-
-### Commit message examples for Release Please
-
-Use Conventional Commit style so release notes/versioning stay clean:
-
-- `feat: add quick-entry support to add-todo`
-- `fix: handle x-things-ids callback from json command`
-- `chore: update docs for npm install examples`
 
 ## License
 
