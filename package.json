@@ -19,6 +19,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "postbuild": "if [ -x scripts/sync-runtime.local.sh ]; then scripts/sync-runtime.local.sh; fi",
     "dev": "tsx watch src/index.ts",
     "test": "vitest run --dir test",
     "prepublishOnly": "npm run build"
